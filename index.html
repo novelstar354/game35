@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>風神録 mini</title>
+<link rel="icon" href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTAycOq5BxpzLitBIHMmgDiFTQRf0nCPJ1ilg&s" sizes="16×16" type="image/png" />
+<style>
+body{margin:0;background:#000;overflow:hidden;font-family:sans-serif}
+canvas{display:block;margin:0 auto;background:#000}
+
+/* UI */
+#autoBtn{
+ position:fixed;
+ right:10px;
+ bottom:60px;
+ padding:10px 16px;
+ font-size:16px;
+ border:none;
+ border-radius:10px;
+ background:#111;
+ color:#0ff;
+ opacity:.9;
+}
+#help{
+ position:fixed;
+ left:0;right:0;bottom:10px;
+ text-align:center;
+ color:#fff;font-size:13px;opacity:.8;
+}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+<button id="autoBtn">AUTO: ON</button>
+<div id="help">PC: 矢印 / Shift / X ｜ スマホ: スワイプ移動・2本指ボム</div>
+
+<script>
+/* ===== Canvas ===== */
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+function resize(){
+ const w=innerWidth,h=innerHeight;
+ const dpr=devicePixelRatio||1;
+ canvas.style.width=w+"px";
+ canvas.style.height=h+"px";
+ canvas.width=w*dpr;
+ canvas.height=h*dpr;
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+resize();
+addEventListener("resize",resize);
+
+const BASE_W=480, BASE_H=720;
+const sx=x=>x/BASE_W*canvas.clientWidth;
+const sy=y=>y/BASE_H*canvas.clientHeight;
+
+/* ===== Player ===== */
+const player={
+ x:240,y:620,
+ r:3,
+ lives:3,
+ inv:0
+};
+
+/* ===== Input ===== */
+const keys={};
+let autoFire=true;
+
+/* PC */
+document.onkeydown=e=>{
+ keys[e.key]=true;
+ if(e.key==="x") toggleAuto();
+};
+document.onkeyup=e=>keys[e.key]=false;
+
+/* Mobile */
+canvas.addEventListener("touchmove",e=>{
+ const t=e.touches[0];
+ const r=canvas.getBoundingClientRect();
+ player.x=(t.clientX-r.left)/r.width*BASE_W;
+ player.y=(t.clientY-r.top)/r.height*BASE_H;
+});
+canvas.addEventListener("touchstart",e=>{
+ if(e.touches.length===2){
+   enemyBullets=[];
+ }
+});
+
+/* ===== Auto Button ===== */
+const autoBtn=document.getElementById("autoBtn");
+autoBtn.onclick=toggleAuto;
+function toggleAuto(){
+ autoFire=!autoFire;
+ autoBtn.textContent="AUTO: "+(autoFire?"ON":"OFF");
+}
+
+/* ===== Shots ===== */
+let shots=[],enemyBullets=[];
+function shoot(){
+ const slow=keys["Shift"];
+ if(slow){
+   [-8,0,8].forEach(o=>{
+     shots.push({x:player.x+o,y:player.y,vx:0,vy:-9});
+   });
+ }else{
+   [-20,-10,0,10,20].forEach(o=>{
+     shots.push({x:player.x+o,y:player.y,vx:0,vy:-8});
+   });
+ }
+}
+
+/* ===== Boss ===== */
+const boss={x:240,y:140,hp:2000};
+let timer=0;
+
+/* ===== Danmaku ===== */
+function circle(){
+ const n=36;
+ for(let i=0;i<n;i++){
+   const a=i*2*Math.PI/n;
+   enemyBullets.push({x:boss.x,y:boss.y,vx:Math.cos(a)*2,vy:Math.sin(a)*2});
+ }
+ if(enemyBullets.length>450) enemyBullets.splice(0,enemyBullets.length-450);
+}
+
+/* ===== Loop ===== */
+function update(){
+ timer++;
+
+ let sp=keys["Shift"]?2:4;
+ if(keys["ArrowLeft"])player.x-=sp;
+ if(keys["ArrowRight"])player.x+=sp;
+ if(keys["ArrowUp"])player.y-=sp;
+ if(keys["ArrowDown"])player.y+=sp;
+
+ player.x=Math.max(10,Math.min(BASE_W-10,player.x));
+ player.y=Math.max(10,Math.min(BASE_H-10,player.y));
+
+ if(autoFire && timer%6===0) shoot();
+ if(timer%60===0) circle();
+
+ shots.forEach(s=>s.y+=s.vy);
+ enemyBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy});
+
+ shots=shots.filter(s=>s.y>0);
+ enemyBullets=enemyBullets.filter(b=>b.y<BASE_H&&b.x>0&&b.x<BASE_W);
+
+ if(player.inv>0) player.inv--;
+
+ enemyBullets.forEach(b=>{
+   const dx=b.x-player.x,dy=b.y-player.y;
+   if(dx*dx+dy*dy<player.r*player.r && player.inv<=0){
+     player.lives--;
+     player.inv=120;
+     enemyBullets=[];
+   }
+ });
+}
+
+function draw(){
+ ctx.fillStyle="rgba(0,0,0,0.3)";
+ ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);
+
+ /* Player */
+ ctx.fillStyle="cyan";
+ ctx.beginPath();
+ ctx.arc(sx(player.x),sy(player.y),6,0,Math.PI*2);
+ ctx.fill();
+
+ /* Hitbox (slow) */
+ if(keys["Shift"]){
+   ctx.fillStyle="red";
+   ctx.beginPath();
+   ctx.arc(sx(player.x),sy(player.y),player.r,0,Math.PI*2);
+   ctx.fill();
+ }
+
+ /* Boss */
+ ctx.fillStyle="purple";
+ ctx.beginPath();
+ ctx.arc(sx(boss.x),sy(boss.y),30,0,Math.PI*2);
+ ctx.fill();
+
+ /* Shots */
+ ctx.fillStyle="white";
+ shots.forEach(s=>ctx.fillRect(sx(s.x)-2,sy(s.y)-6,4,8));
+
+ /* Enemy bullets */
+ ctx.fillStyle="magenta";
+ enemyBullets.forEach(b=>{
+   ctx.beginPath();
+   ctx.arc(sx(b.x),sy(b.y),4,0,Math.PI*2);
+   ctx.fill();
+ });
+
+ ctx.fillStyle="#fff";
+ ctx.fillText("Lives:"+player.lives,10,20);
+}
+
+function loop(){
+ update();
+ draw();
+ requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
