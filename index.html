@@ -3,209 +3,238 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>風神録 mini</title>
-<link rel="icon" href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTAycOq5BxpzLitBIHMmgDiFTQRf0nCPJ1ilg&s" sizes="16×16" type="image/png" />
+<title>風神録</title>
+<link rel="icon" href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTAycOq5BxpzLitBIHMmgDiFTQRf0nCPJ1ilg&s" sizes="16×16" type="image/png" /> 
 <style>
-body{margin:0;background:#000;overflow:hidden;font-family:sans-serif}
-canvas{display:block;margin:0 auto;background:#000}
-
-/* UI */
-#autoBtn{
- position:fixed;
- right:10px;
- bottom:60px;
- padding:10px 16px;
- font-size:16px;
- border:none;
- border-radius:10px;
- background:#111;
- color:#0ff;
- opacity:.9;
+html,body{
+ margin:0; padding:0; background:#000; overflow:hidden;
+ touch-action:none;
+ font-family:system-ui;
 }
-#help{
- position:fixed;
- left:0;right:0;bottom:10px;
- text-align:center;
- color:#fff;font-size:13px;opacity:.8;
+canvas{display:block;margin:auto;background:#000}
+#menu{
+ position:fixed; inset:0; display:flex; flex-direction:column;
+ justify-content:center; align-items:center;
+ background:#000; color:#fff; z-index:10;
 }
+.option{font-size:26px;padding:8px 24px;cursor:pointer}
+.option.sel{color:red;font-size:36px;transform:scale(1.2)}
+#overlay{
+ position:fixed; inset:0; display:none; flex-direction:column;
+ align-items:center; justify-content:center; color:#fff; z-index:20;
+}
+#overlay h1{font-size:64px}
+#overlay button{font-size:24px;padding:10px 24px}
 </style>
 </head>
 <body>
 
+<div id="menu">
+ <h1>Difficulty Select</h1>
+ <div class="option sel">Easy</div>
+ <div class="option">Normal</div>
+ <div class="option">Hard</div>
+ <div class="option">Lunatic</div>
+</div>
+
+<div id="overlay">
+ <h1 id="ovTitle"></h1>
+ <p id="ovScore"></p>
+ <button onclick="location.reload()">Restart</button>
+</div>
+
 <canvas id="game"></canvas>
-<button id="autoBtn">AUTO: ON</button>
-<div id="help">PC: 矢印 / Shift / X ｜ スマホ: スワイプ移動・2本指ボム</div>
 
 <script>
 /* ===== Canvas ===== */
 const canvas=document.getElementById("game");
 const ctx=canvas.getContext("2d");
-
 function resize(){
- const w=innerWidth,h=innerHeight;
- const dpr=devicePixelRatio||1;
- canvas.style.width=w+"px";
- canvas.style.height=h+"px";
- canvas.width=w*dpr;
- canvas.height=h*dpr;
- ctx.setTransform(dpr,0,0,dpr,0,0);
+ const s=Math.min(innerWidth/480,innerHeight/720);
+ canvas.width=480; canvas.height=720;
+ canvas.style.width=480*s+"px";
+ canvas.style.height=720*s+"px";
 }
-resize();
-addEventListener("resize",resize);
+addEventListener("resize",resize); resize();
 
-const BASE_W=480, BASE_H=720;
-const sx=x=>x/BASE_W*canvas.clientWidth;
-const sy=y=>y/BASE_H*canvas.clientHeight;
+/* ===== Difficulty ===== */
+const DIFFS=[
+ {name:"Easy",mul:0.7,rate:120,hp:1},
+ {name:"Normal",mul:1,rate:90,hp:1},
+ {name:"Hard",mul:1.4,rate:60,hp:1},
+ {name:"Lunatic",mul:3,rate:20,hp:2}
+];
+let DIFF=DIFFS[1];
+
+/* ===== Menu ===== */
+const menu=document.getElementById("menu");
+const opts=[...document.querySelectorAll(".option")];
+let sel=0;
+function updMenu(){
+ opts.forEach((o,i)=>o.classList.toggle("sel",i===sel));
+}
+updMenu();
+addEventListener("keydown",e=>{
+ if(menu.style.display!=="none"){
+  if(e.key==="ArrowUp") sel=(sel+3)%4;
+  if(e.key==="ArrowDown") sel=(sel+1)%4;
+  if(e.key==="Enter") start();
+  updMenu();
+ }
+});
+opts.forEach((o,i)=>o.onclick=()=>{sel=i;start();});
+function start(){
+ DIFF=DIFFS[sel];
+ menu.style.display="none";
+ requestAnimationFrame(loop);
+}
 
 /* ===== Player ===== */
-const player={
- x:240,y:620,
- r:3,
- lives:3,
- inv:0
+const player={x:240,y:620,r:6,hit:3,life:3,bomb:3,inv:0};
+let keys={},auto=true;
+onkeydown=e=>{keys[e.key]=1;if(e.key==="x")auto=!auto;if(e.key==="b")bomb();};
+onkeyup=e=>keys[e.key]=0;
+
+/* ===== Touch ===== */
+let touching=false;
+canvas.ontouchstart=e=>{
+ touching=true;
+ moveTouch(e);
 };
-
-/* ===== Input ===== */
-const keys={};
-let autoFire=true;
-
-/* PC */
-document.onkeydown=e=>{
- keys[e.key]=true;
- if(e.key==="x") toggleAuto();
-};
-document.onkeyup=e=>keys[e.key]=false;
-
-/* Mobile */
-canvas.addEventListener("touchmove",e=>{
- const t=e.touches[0];
- const r=canvas.getBoundingClientRect();
- player.x=(t.clientX-r.left)/r.width*BASE_W;
- player.y=(t.clientY-r.top)/r.height*BASE_H;
-});
-canvas.addEventListener("touchstart",e=>{
- if(e.touches.length===2){
-   enemyBullets=[];
- }
-});
-
-/* ===== Auto Button ===== */
-const autoBtn=document.getElementById("autoBtn");
-autoBtn.onclick=toggleAuto;
-function toggleAuto(){
- autoFire=!autoFire;
- autoBtn.textContent="AUTO: "+(autoFire?"ON":"OFF");
+canvas.ontouchmove=moveTouch;
+canvas.ontouchend=()=>touching=false;
+function moveTouch(e){
+ let r=canvas.getBoundingClientRect();
+ let t=e.touches[0];
+ player.x=(t.clientX-r.left)/r.width*480;
+ player.y=(t.clientY-r.top)/r.height*720;
 }
 
-/* ===== Shots ===== */
-let shots=[],enemyBullets=[];
-function shoot(){
- const slow=keys["Shift"];
- if(slow){
-   [-8,0,8].forEach(o=>{
-     shots.push({x:player.x+o,y:player.y,vx:0,vy:-9});
-   });
- }else{
-   [-20,-10,0,10,20].forEach(o=>{
-     shots.push({x:player.x+o,y:player.y,vx:0,vy:-8});
-   });
- }
-}
+/* ===== Objects ===== */
+let shots=[],bullets=[],effects=[];
+let timer=0,score=0,stage=1;
 
 /* ===== Boss ===== */
-const boss={x:240,y:140,hp:2000};
-let timer=0;
+const boss={x:240,y:120,hp:2000,max:2000,act:false,vx:2};
 
-/* ===== Danmaku ===== */
-function circle(){
- const n=36;
+/* ===== Functions ===== */
+function shoot(){
+ const slow=keys.Shift||touching;
+ const sp=7;
+ const a=slow?[-12,-6,6,12]:[-0.5,-0.25,0.25,0.5];
+ a.forEach(v=>shots.push({
+  x:player.x,y:player.y,
+  vx:slow?v:v*sp,
+  vy:-sp
+ }));
+}
+
+function bomb(){
+ if(player.bomb<=0)return;
+ player.bomb--;
+ bullets=[];
+ effects.push({x:player.x,y:player.y,t:60});
+}
+
+function circle(n,s){
  for(let i=0;i<n;i++){
-   const a=i*2*Math.PI/n;
-   enemyBullets.push({x:boss.x,y:boss.y,vx:Math.cos(a)*2,vy:Math.sin(a)*2});
+  let a=i*Math.PI*2/n;
+  bullets.push({
+   x:boss.x,y:boss.y,
+   vx:Math.cos(a)*s,vy:Math.sin(a)*s
+  });
  }
- if(enemyBullets.length>450) enemyBullets.splice(0,enemyBullets.length-450);
+}
+
+/* ===== Update ===== */
+function update(){
+ timer++;
+ if(auto && timer%5===0) shoot();
+ if(keys.z && timer%5===0) shoot();
+
+ let sp=keys.Shift?2:4;
+ if(keys.ArrowLeft)player.x-=sp;
+ if(keys.ArrowRight)player.x+=sp;
+ if(keys.ArrowUp)player.y-=sp;
+ if(keys.ArrowDown)player.y+=sp;
+
+ shots.forEach(s=>{s.x+=s.vx;s.y+=s.vy});
+ bullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy});
+
+ if(timer>120) boss.act=true;
+ if(boss.act){
+  boss.x+=boss.vx;
+  if(boss.x<60||boss.x>420)boss.vx*=-1;
+  if(timer%DIFF.rate===0)
+   circle(DIFF===DIFFS[3]?120:60,2.5*DIFF.mul);
+ }
+
+ shots=shots.filter(s=>{
+  let dx=s.x-boss.x,dy=s.y-boss.y;
+  if(dx*dx+dy*dy<900 && boss.act){
+   boss.hp-=5; score+=10; return false;
+  }
+  return s.y>0;
+ });
+
+ bullets=bullets.filter(b=>{
+  let dx=b.x-player.x,dy=b.y-player.y;
+  if(dx*dx+dy*dy<player.hit*player.hit && !player.inv){
+   player.life--; player.inv=120; bullets=[];
+  }
+  return b.y<740;
+ });
+
+ if(player.inv)player.inv--;
+ if(player.life<=0) end(false);
+
+ if(boss.hp<=0){
+  if(stage===4) end(true);
+  stage++; boss.hp=boss.max+=1500; timer=0;
+ }
+}
+
+/* ===== Draw ===== */
+function draw(){
+ ctx.fillStyle="rgba(0,0,0,0.3)";
+ ctx.fillRect(0,0,480,720);
+
+ ctx.fillStyle="cyan";
+ ctx.beginPath();ctx.arc(player.x,player.y,player.hit,0,7);ctx.fill();
+
+ ctx.fillStyle="white";
+ shots.forEach(s=>ctx.fillRect(s.x-2,s.y-6,4,8));
+
+ ctx.fillStyle="magenta";
+ bullets.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,4,0,7);ctx.fill()});
+
+ if(boss.act){
+  ctx.fillStyle="purple";
+  ctx.beginPath();ctx.arc(boss.x,boss.y,30,0,7);ctx.fill();
+  ctx.fillStyle="#222";ctx.fillRect(20,10,440,14);
+  ctx.fillStyle="lime";ctx.fillRect(20,10,440*(boss.hp/boss.max),14);
+ }
+
+ ctx.fillStyle="#fff";
+ ctx.fillText("Life:"+player.life,10,40);
+ ctx.fillText("Bomb:"+player.bomb,10,60);
+ ctx.fillText("Score:"+score,10,80);
+ ctx.fillText("Stage:"+stage,10,100);
+}
+
+/* ===== End ===== */
+const ov=document.getElementById("overlay");
+function end(clear){
+ ov.style.display="flex";
+ ovTitle.textContent=clear?"★ GAME CLEAR ★":"GAME OVER";
+ ovScore.textContent="Score: "+score;
 }
 
 /* ===== Loop ===== */
-function update(){
- timer++;
-
- let sp=keys["Shift"]?2:4;
- if(keys["ArrowLeft"])player.x-=sp;
- if(keys["ArrowRight"])player.x+=sp;
- if(keys["ArrowUp"])player.y-=sp;
- if(keys["ArrowDown"])player.y+=sp;
-
- player.x=Math.max(10,Math.min(BASE_W-10,player.x));
- player.y=Math.max(10,Math.min(BASE_H-10,player.y));
-
- if(autoFire && timer%6===0) shoot();
- if(timer%60===0) circle();
-
- shots.forEach(s=>s.y+=s.vy);
- enemyBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy});
-
- shots=shots.filter(s=>s.y>0);
- enemyBullets=enemyBullets.filter(b=>b.y<BASE_H&&b.x>0&&b.x<BASE_W);
-
- if(player.inv>0) player.inv--;
-
- enemyBullets.forEach(b=>{
-   const dx=b.x-player.x,dy=b.y-player.y;
-   if(dx*dx+dy*dy<player.r*player.r && player.inv<=0){
-     player.lives--;
-     player.inv=120;
-     enemyBullets=[];
-   }
- });
-}
-
-function draw(){
- ctx.fillStyle="rgba(0,0,0,0.3)";
- ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);
-
- /* Player */
- ctx.fillStyle="cyan";
- ctx.beginPath();
- ctx.arc(sx(player.x),sy(player.y),6,0,Math.PI*2);
- ctx.fill();
-
- /* Hitbox (slow) */
- if(keys["Shift"]){
-   ctx.fillStyle="red";
-   ctx.beginPath();
-   ctx.arc(sx(player.x),sy(player.y),player.r,0,Math.PI*2);
-   ctx.fill();
- }
-
- /* Boss */
- ctx.fillStyle="purple";
- ctx.beginPath();
- ctx.arc(sx(boss.x),sy(boss.y),30,0,Math.PI*2);
- ctx.fill();
-
- /* Shots */
- ctx.fillStyle="white";
- shots.forEach(s=>ctx.fillRect(sx(s.x)-2,sy(s.y)-6,4,8));
-
- /* Enemy bullets */
- ctx.fillStyle="magenta";
- enemyBullets.forEach(b=>{
-   ctx.beginPath();
-   ctx.arc(sx(b.x),sy(b.y),4,0,Math.PI*2);
-   ctx.fill();
- });
-
- ctx.fillStyle="#fff";
- ctx.fillText("Lives:"+player.lives,10,20);
-}
-
 function loop(){
- update();
- draw();
+ update(); draw();
  requestAnimationFrame(loop);
 }
-loop();
 </script>
 </body>
 </html>
